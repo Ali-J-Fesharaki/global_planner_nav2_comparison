@@ -2,16 +2,16 @@
 import rclpy
 from rclpy.node import Node
 from rclpy.action import ActionClient
+from rclpy.executors import MultiThreadedExecutor
 from nav2_msgs.action import ComputePathToPose
 from nav2_benchmark_global_planner.srv import ComputePathWithKPI
 import psutil, time
+import threading
 
-class PathServiceNode(Node):
+class PathActionClientNode(Node):
     def __init__(self):
-        super().__init__('path_service_node')
-        self.get_logger().info('Initializing path service node')
-        self.srv = self.create_service(ComputePathWithKPI, 'compute_path_kpi', self.handle_request)
-        self.get_logger().info('Service "compute_path_kpi" created')
+        super().__init__('path_action_client_node')
+        self.get_logger().info('Initializing path action client node')
         
         self.action_client = ActionClient(self, ComputePathToPose, 'compute_path_to_pose')
         self.get_logger().info('Action client for "compute_path_to_pose" created')
@@ -20,21 +20,37 @@ class PathServiceNode(Node):
             self.get_logger().info("Waiting for planner action server...")
         self.get_logger().info("Planner action server is available")
 
+    def compute_path_async(self, start, goal, planner_id, use_start):
+        action_goal = ComputePathToPose.Goal()
+        action_goal.start = start
+        action_goal.goal = goal
+        action_goal.planner_id = planner_id
+        action_goal.use_start = use_start
+        
+        self.get_logger().info("Sending goal to compute_path_to_pose action server")
+        send_goal_future = self.action_client.send_goal_async(action_goal)
+        return send_goal_future
+
+class PathServiceNode(Node):
+    def __init__(self, action_client_node):
+        super().__init__('path_service_node')
+        self.get_logger().info('Initializing path service node')
+        self.action_client_node = action_client_node
+        self.srv = self.create_service(ComputePathWithKPI, 'compute_path_kpi', self.handle_request)
+        self.get_logger().info('Service "compute_path_kpi" created')
+
     def handle_request(self, request, response):
         self.get_logger().info(f"Received path planning request from ({request.start.pose.position.x:.2f}, {request.start.pose.position.y:.2f}) to ({request.goal.pose.position.x:.2f}, {request.goal.pose.position.y:.2f})")
         
-        action_goal = ComputePathToPose.Goal()
-        action_goal.start = request.start
-        action_goal.goal = request.goal
-        action_goal.planner_id = request.planner_id
-        action_goal.use_start = request.use_start
         cpu_before = psutil.cpu_percent(interval=None)
         start_time = time.time()
 
         # Send the goal and wait for the result
-        self.get_logger().info("Sending goal to compute_path_to_pose action server")
-        send_goal_future = self.action_client.send_goal_async(action_goal)
-        rclpy.spin_until_future_complete(self, send_goal_future, timeout_sec=5.0)
+        send_goal_future = self.action_client_node.compute_path_async(
+            request.start, request.goal, request.planner_id, request.use_start
+        )
+        
+        rclpy.spin_until_future_complete(self.action_client_node, send_goal_future, timeout_sec=10.0)
         
         if not send_goal_future.result():
             self.get_logger().error("Failed to send goal to action server")
@@ -50,7 +66,7 @@ class PathServiceNode(Node):
         
         self.get_logger().info("Goal accepted by action server, waiting for result")    
         result_future = goal_handle.get_result_async()
-        rclpy.spin_until_future_complete(self, result_future)
+        rclpy.spin_until_future_complete(self.action_client_node, result_future, timeout_sec=10.0)
         
         elapsed = time.time() - start_time
         cpu_after = psutil.cpu_percent(interval=None)
@@ -84,7 +100,22 @@ class PathServiceNode(Node):
 if(__name__ == '__main__'):
     print("Starting Path Service Node...")
     rclpy.init()
-    node = PathServiceNode()
-    rclpy.spin(node)
-    node.destroy_node()
-    rclpy.shutdown()
+    
+    # Create both nodes
+    action_client_node = PathActionClientNode()
+    service_node = PathServiceNode(action_client_node)
+    
+    # Create executor with multiple threads
+    executor = MultiThreadedExecutor(num_threads=2)
+    executor.add_node(action_client_node)
+    executor.add_node(service_node)
+    
+    try:
+        executor.spin()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        executor.shutdown()
+        action_client_node.destroy_node()
+        service_node.destroy_node()
+        rclpy.shutdown()

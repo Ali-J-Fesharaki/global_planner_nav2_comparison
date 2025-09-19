@@ -18,8 +18,10 @@ def generate_launch_description():
             package="nav2_planner",
             executable="planner_server",
             name="planner_server",
-            output="log",
-            parameters=[nav2_config_path]
+            output="screen",
+            parameters=[nav2_config_path],
+            arguments=['--ros-args', '--log-level', 'planner_server:=debug']
+
         )
     lifecycle_manager_cmd=Node(
             package="nav2_lifecycle_manager",
@@ -60,7 +62,7 @@ def generate_launch_description():
         map_server_cmd,
         planner_server_cmd,
         lifecycle_manager_cmd,
-        map_odom_tf_pub_cmd,
+        # map_odom_tf_pub_cmd,
         # odom_base_link_tf_pub_cmd,
         # path_service_node_cmd,
         # benchmark_client_cmd

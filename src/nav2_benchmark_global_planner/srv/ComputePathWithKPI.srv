@@ -1,0 +1,11 @@
+geometry_msgs/PoseStamped start
+geometry_msgs/PoseStamped goal
+bool use_start
+string planner_id
+---
+nav_msgs/Path path
+float64 planning_time
+float64 path_length
+float64 cpu_usage
+bool success
+

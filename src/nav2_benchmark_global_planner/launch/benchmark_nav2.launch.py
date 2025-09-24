@@ -5,6 +5,7 @@ from ament_index_python.packages import get_package_share_directory
 
 def generate_launch_description():
     pkg_base_path=get_package_share_directory('nav2_benchmark_global_planner')
+    rviz_config_path = PathJoinSubstitution([pkg_base_path, 'config', 'map_comarison.rviz'])
     nav2_config_path=PathJoinSubstitution([pkg_base_path, 'config', 'nav2_params.yaml'])
     map_path=PathJoinSubstitution([pkg_base_path, 'maps', 'maze_orthogonal.yaml'])
     map_server_cmd=Node(
@@ -34,22 +35,17 @@ def generate_launch_description():
                 "node_names": ["map_server", "planner_server"]
             }]
         )
-    map_odom_tf_pub_cmd=Node(
+    map_base_link_tf_pub_cmd=Node(
         package="tf2_ros",
         executable="static_transform_publisher",
         arguments=["0.0", "0.0", "0.0", "0.0", "0.0", "0.0", "map", "base_link"],
-        name="map_odom_tf_pub"
-    )
-    odom_base_link_tf_pub_cmd=Node(
-        package="tf2_ros",
-        executable="static_transform_publisher",
-        arguments=["0.0", "0.0", "0.0", "0.0", "0.0", "0.0", "odom", "base_link"],
-        name="odom_base_link_tf_pub"
+        name="map_base_link_tf_pub"
     )
     path_service_node_cmd=Node(
         package="nav2_benchmark_global_planner",
         executable="path_service_node.py",
         name="path_service_node",
+        respawn=True,
         output="log"
     )
     benchmark_client_cmd=Node(
@@ -57,13 +53,20 @@ def generate_launch_description():
         executable="benchmark_client.py",
         name="benchmark_client",
         output="screen"
+    )  
+    rviz_cmd = Node(
+        package="rviz2",
+        executable="rviz2",
+        name="rviz2",
+        output="screen",
+        arguments=["-d", rviz_config_path]
     )
     return LaunchDescription([
         map_server_cmd,
         planner_server_cmd,
         lifecycle_manager_cmd,
-        map_odom_tf_pub_cmd,
-        # odom_base_link_tf_pub_cmd,
+        map_base_link_tf_pub_cmd,
         # path_service_node_cmd,
-        # benchmark_client_cmd
+        # benchmark_client_cmd,
+        # rviz_cmd
     ])

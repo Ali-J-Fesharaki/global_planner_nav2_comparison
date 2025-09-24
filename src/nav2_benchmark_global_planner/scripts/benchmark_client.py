@@ -11,7 +11,7 @@ import yaml, cv2, os
 from ament_index_python.packages import get_package_share_directory
 from rclpy.executors import MultiThreadedExecutor
 import time
-
+import csv
 class TFPublisherNode(Node):
     def __init__(self):
         super().__init__('tf_publisher')
@@ -56,10 +56,11 @@ class BenchmarkClient(Node):
         base_path = get_package_share_directory('nav2_benchmark_global_planner')
         self.maps_dir = os.path.join(base_path, "maps")
         self.start_goal_sets = [
-            ((7.0, 8.0), (10.0, 12.0)),
-
+            ((1.5, 1.5), (10.0, 10.0)),
+            ((1.5, 1.5), (11.0, 1.5)),
+            ((25.3, 1.5), (23.3, 47.5))
         ]
-        self.planners = ["NavfnPlanner", "SmacPlanner2D", "SmacPlannerHybrid", "SmacPlannerLattice", "ThetaStarPlanner"]
+        self.planners = ["NavfnPlanner","NavfnPlanner_Astar","SmacPlanner2D", "SmacPlannerHybrid", "SmacPlannerLattice", "ThetaStarPlanner"]
         self.collision_models =["al"]
         
         # Store reference to TF publisher node to update start position
@@ -101,6 +102,7 @@ class BenchmarkClient(Node):
     def run_tests(self):
         # Keep TF publishing regardless of service availability
         maps = [f for f in os.listdir(self.maps_dir) if f.endswith('.yaml')]
+        #maps =["maze_orthogonal.yaml"]
         self.get_logger().info(f"Found {len(maps)} maps to test")
         
         # Wait for services, but continue with TF publishing even if they're not available
@@ -112,7 +114,7 @@ class BenchmarkClient(Node):
             map_path = os.path.join(self.maps_dir, map_file)
             self.get_logger().info(f"Testing map: {map_file}")
             self.reload_map(map_path)
-
+            self.create_start_goal_sets(map_path)
             with open(map_path, "r") as f:
                 map_yaml = yaml.safe_load(f)
             img = cv2.imread(os.path.join(self.maps_dir, map_yaml["image"]), cv2.IMREAD_GRAYSCALE)
@@ -126,8 +128,8 @@ class BenchmarkClient(Node):
 
                     for start, goal in self.start_goal_sets:
                         # Update start point in TF publisher node
-                        if self.tf_publisher:
-                            self.tf_publisher.update_start_point(start[0], start[1])
+                        # if self.tf_publisher:
+                        #     self.tf_publisher.update_start_point(start[0], start[1])
                         
                         self.get_logger().info(f"Testing path from {start} to {goal}")
                         self.call_path_service(img_color.copy(), map_yaml,
@@ -135,9 +137,25 @@ class BenchmarkClient(Node):
 
     # Other methods remain unchanged...
     def reload_map(self, yaml_file):
-        pass
-        # No changes to this method
+        self.get_logger().info(f"Reloading map from {yaml_file}")
+        time.sleep(2.0)  # Ensure map server is ready
+        req = SetParameters.Request()
+        req.parameters = [rclpy.parameter.Parameter("yaml_filename", rclpy.Parameter.Type.STRING, yaml_file).to_parameter_msg()]
+        self.map_param_client.call_async(req)
+        time.sleep(2.0)  # Ensure map server is ready
 
+        self.get_logger().info("Cycling map server lifecycle")
+        change_req = ChangeState.Request()
+        change_req.transition.id = Transition.TRANSITION_DEACTIVATE
+        self.map_lifecycle_client.call_async(change_req)
+        time.sleep(2.0)  # Ensure map server is ready
+        change_req.transition.id = Transition.TRANSITION_ACTIVATE
+        self.map_lifecycle_client.call_async(change_req)
+        time.sleep(2.0)  # Ensure map server is ready
+
+
+    def create_start_goal_sets(self, map_path):
+        pass
     def switch_planner(self, name, plugin):
         pass
         # No changes to this method
@@ -157,26 +175,31 @@ class BenchmarkClient(Node):
         req.start = PoseStamped()
         req.start.header.frame_id = "map"
         req.start.pose.position.x, req.start.pose.position.y = start
+        print("start point: ")
+        print(req.start.pose.position.x, req.start.pose.position.y)
         # Set orientation to a fixed quaternion representing 45 degrees rotation
         req.start.pose.orientation.x = 0.0
         req.start.pose.orientation.y = 0.0
         req.start.pose.orientation.z = 0.3826834323650898  # sin(45 degrees / 2)
         req.start.pose.orientation.w = 0.9238795325112867  # cos(45 degrees / 2)
 
+
         req.goal = PoseStamped()
         req.goal.header.frame_id = "map"
         req.goal.pose.position.x, req.goal.pose.position.y = goal
+        print("goal point: ")
+        print(req.goal.pose.position.x, req.goal.pose.position.y)
         req.goal.pose.orientation.x = 0.0
         req.goal.pose.orientation.y = 0.0
         req.goal.pose.orientation.z = 0.3826834323650898  # sin(45 degrees / 2)
         req.goal.pose.orientation.w = 0.9238795325112867  # cos(45 degrees / 2)
 
         # Additional required parameters
-        req.use_start = False
+        req.use_start = True
         req.planner_id = planner_id
         self.get_logger().info("Calling path service...")
         future = self.path_client.call_async(req)
-        rclpy.spin_until_future_complete(self, future, timeout_sec=10.0)
+        rclpy.spin_until_future_complete(self, future, timeout_sec=2.0)
         result = future.result()
 
         if result and result.success:
@@ -194,8 +217,28 @@ class BenchmarkClient(Node):
             y = int((pose.pose.position.y - origin[1]) / resolution)
             cv2.circle(img, (x, img.shape[0]-y), 2, (0,0,255), -1)
 
-        text = f"{planner_id} | {model_name} | L={result.path_length:.2f} | T={result.planning_time:.3f}s"
-        cv2.putText(img, text, (10,30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255,0,0), 2)
+        # Prepare the CSV file path
+        csv_file = "results/benchmark_results.csv"
+        os.makedirs("results", exist_ok=True)
+
+        # Check if the file exists to determine if headers need to be written
+        file_exists = os.path.isfile(csv_file)
+
+        # Write the results to the CSV file
+        with open(csv_file, mode='a', newline='') as file:
+            writer = csv.writer(file)
+            if not file_exists:
+                # Write the header row if the file is new
+                writer.writerow(["Map", "Planner", "Collision Model", "Path Length", "Planning Time", "Start", "Goal"])
+            writer.writerow([
+            map_file, 
+            planner_id, 
+            model_name, 
+            f"{result.path_length:.2f}", 
+            f"{result.planning_time:.3f}", 
+            f"{start[0]},{start[1]}", 
+            f"{goal[0]},{goal[1]}"
+            ])
 
         start_str = f"{start[0]}_{start[1]}"
         goal_str = f"{goal[0]}_{goal[1]}"
@@ -218,12 +261,13 @@ if(__name__ == '__main__'):
     benchmark_client.set_tf_publisher(tf_publisher)
     
     # Create multi-threaded executor to run both nodes
-    executor = MultiThreadedExecutor(num_threads=2)
-    executor.add_node(tf_publisher)
+    executor = MultiThreadedExecutor(num_threads=1)
+    #executor.add_node(tf_publisher)
     executor.add_node(benchmark_client)
     
     # Spin in a separate thread for TF publishing to continue regardless of service availability
     import threading
+
     executor_thread = threading.Thread(target=executor.spin, daemon=True)
     executor_thread.start()
     

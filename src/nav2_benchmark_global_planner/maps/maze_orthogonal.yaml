@@ -1,6 +1,6 @@
-image: warehouse.pgm
+image: maze_orthogonal.pgm
 mode: trinary
-resolution: 0.03
+resolution: 0.15
 origin: [0, 0, 0]
 negate: 0
 occupied_thresh: 0.65

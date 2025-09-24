@@ -3,13 +3,20 @@ planner_server:
     expected_planner_frequency: 20.0
     use_sim_time: false
     # List of available global planner plugins
-    planner_plugins: ["NavfnPlanner", "SmacPlanner2D", "SmacPlannerHybrid", "SmacPlannerLattice", "ThetaStarPlanner"]
+    planner_plugins: ["NavfnPlanner","NavfnPlanner_Astar","SmacPlanner2D", "SmacPlannerHybrid", "SmacPlannerLattice", "ThetaStarPlanner"]
 
     NavfnPlanner:
       plugin: "nav2_navfn_planner/NavfnPlanner"  # Plugin type
       tolerance: 0.5  # Goal tolerance (meters)
       use_astar: false  # Use A* (true) or Dijkstra (false)
       allow_unknown: true  # Allow planning through unknown space
+
+    NavfnPlanner_Astar:
+      plugin: "nav2_navfn_planner/NavfnPlanner" 
+      tolerance: 0.5
+      use_astar: true
+      allow_unknown: true
+
 
     SmacPlanner2D:
       plugin: "nav2_smac_planner/SmacPlanner2D"
@@ -61,8 +68,8 @@ global_costmap:
       robot_base_frame: base_link
       static_map: true
       use_sim_time: False
-      robot_radius: 0.2
-      resolution: 0.05
+      robot_radius: 0.65
+      resolution: 0.15
       #footprint: "[[-0.2, -0.2], [0.2, -0.2], [0.2, 0.2], [-0.2, 0.2]]]"
       track_unknown_space: true
       plugins: ["static_layer", "inflation_layer"]
@@ -85,8 +92,8 @@ local_costmap:
       rolling_window: false
       width: 3
       height: 3
-      resolution: 0.05
-      robot_radius: 0.2
+      resolution: 0.15
+      robot_radius: 0.65
       use_sim_time: false
       plugins: ["static_layer", "inflation_layer"]
       static_layer:

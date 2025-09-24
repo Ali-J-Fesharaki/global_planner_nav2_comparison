@@ -6,7 +6,7 @@ from ament_index_python.packages import get_package_share_directory
 def generate_launch_description():
     pkg_base_path=get_package_share_directory('nav2_benchmark_global_planner')
     nav2_config_path=PathJoinSubstitution([pkg_base_path, 'config', 'nav2_params.yaml'])
-    map_path=PathJoinSubstitution([pkg_base_path, 'maps', 'final_scenario.yaml'])
+    map_path=PathJoinSubstitution([pkg_base_path, 'maps', 'maze_orthogonal.yaml'])
     map_server_cmd=Node(
             package="nav2_map_server",
             executable="map_server",
@@ -62,7 +62,7 @@ def generate_launch_description():
         map_server_cmd,
         planner_server_cmd,
         lifecycle_manager_cmd,
-        # map_odom_tf_pub_cmd,
+        map_odom_tf_pub_cmd,
         # odom_base_link_tf_pub_cmd,
         # path_service_node_cmd,
         # benchmark_client_cmd

@@ -50,7 +50,7 @@ class PathServiceNode(Node):
             request.start, request.goal, request.planner_id, request.use_start
         )
         
-        rclpy.spin_until_future_complete(self.action_client_node, send_goal_future, timeout_sec=10.0)
+        rclpy.spin_until_future_complete(self.action_client_node, send_goal_future, timeout_sec=2.0)
         
         if not send_goal_future.result():
             self.get_logger().error("Failed to send goal to action server")
@@ -66,7 +66,7 @@ class PathServiceNode(Node):
         
         self.get_logger().info("Goal accepted by action server, waiting for result")    
         result_future = goal_handle.get_result_async()
-        rclpy.spin_until_future_complete(self.action_client_node, result_future, timeout_sec=10.0)
+        rclpy.spin_until_future_complete(self.action_client_node, result_future, timeout_sec=2.0)
         
         elapsed = time.time() - start_time
         cpu_after = psutil.cpu_percent(interval=None)

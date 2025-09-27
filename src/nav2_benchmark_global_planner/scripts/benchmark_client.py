@@ -12,6 +12,10 @@ from ament_index_python.packages import get_package_share_directory
 from rclpy.executors import MultiThreadedExecutor
 import time
 import csv
+import threading
+import numpy as np
+from nav2_msgs.msg import Costmap
+from nav2_msgs.srv import GetCostmap
 class TFPublisherNode(Node):
     def __init__(self):
         super().__init__('tf_publisher')
@@ -51,7 +55,9 @@ class BenchmarkClient(Node):
         self.path_client = self.create_client(ComputePathWithKPI, 'compute_path_kpi')
         self.map_param_client = self.create_client(SetParameters, '/map_server/set_parameters')
         self.planner_param_client = self.create_client(SetParameters, '/planner_server/set_parameters')
+        self.collision_models_client=self.create_client(SetParameters, '/global_costmap/global_costmap/set_parameters')
         self.map_lifecycle_client = self.create_client(ChangeState, '/map_server/change_state')
+        self.get_costmap_client = self.create_client(GetCostmap, '/global_costmap/get_costmap')
         
         base_path = get_package_share_directory('nav2_benchmark_global_planner')
         self.maps_dir = os.path.join(base_path, "maps")
@@ -61,8 +67,11 @@ class BenchmarkClient(Node):
             ((25.3, 1.5), (23.3, 47.5))
         ]
         self.planners = ["NavfnPlanner","NavfnPlanner_Astar","SmacPlanner2D", "SmacPlannerHybrid", "SmacPlannerLattice", "ThetaStarPlanner"]
-        self.collision_models =["al"]
-        
+        self.collision_models = [
+            ("rad", [rclpy.parameter.Parameter("robot_radius", rclpy.Parameter.Type.DOUBLE, 0.52)]),
+            ("foot", [rclpy.parameter.Parameter("footprint", rclpy.Parameter.Type.STRING,
+                "[[-0.52, -0.25], [0.52, -0.25], [0.52, 0.25], [-0.52, 0.25]]")])
+        ]
         # Store reference to TF publisher node to update start position
         self.tf_publisher = None
         self.services_available = False
@@ -98,7 +107,47 @@ class BenchmarkClient(Node):
             time.sleep(1.0)
         
         return False
+    def get_costmap_as_image(self):
+        """
+        Get the costmap by calling the /global_costmap/get_costmap service
+        and convert it to a cv2 image.
+        
+        Returns:
+            numpy.ndarray: The costmap as a cv2 image
+        """
+        
+        # Create and send request
+        request = GetCostmap.Request()
+        future = self.get_costmap_client.call_async(request)
 
+        # Wait for response
+        rclpy.spin_until_future_complete(self, future, timeout_sec=5.0)
+        if future.result() is None:
+            self.get_logger().error("Service call failed")
+            return None
+        
+        # Get the costmap from the response
+        costmap_msg = future.result().map
+        # Convert costmap data to numpy array
+        width = costmap_msg.metadata.size_x
+        height = costmap_msg.metadata.size_y
+
+        # The costmap data is a flat array, reshape it to 2D
+        costmap_data = np.array(costmap_msg.data, dtype=np.uint8).reshape((height, width))
+        
+        # Convert costmap values to proper image representation
+        # In costmap: 0 = free space, 100 = occupied, 255 = unknown
+        # For image: 0 = black (occupied), 255 = white (free space)
+
+        # Flip the image vertically since costmap origin is typically bottom-left
+        # but image coordinate system has origin at top-left
+        costmap_image = np.flipud(costmap_data)
+        # Invert the image: convert white to black and black to white
+        #costmap_image = np.fliplr(costmap_data)
+        # Rotate the image 90 degrees counter clockwise
+        #costmap_image = np.rot90(costmap_image)
+        costmap_data = 255 - costmap_image
+        return costmap_data
     def run_tests(self):
         # Keep TF publishing regardless of service availability
         maps = [f for f in os.listdir(self.maps_dir) if f.endswith('.yaml')]
@@ -109,7 +158,7 @@ class BenchmarkClient(Node):
         if not self.wait_for_services():
             self.get_logger().error("Services not available. TF will continue to publish, but no benchmarks will run.")
             return
-        
+       
         for map_file in maps:
             map_path = os.path.join(self.maps_dir, map_file)
             self.get_logger().info(f"Testing map: {map_file}")
@@ -117,15 +166,14 @@ class BenchmarkClient(Node):
             self.create_start_goal_sets(map_path)
             with open(map_path, "r") as f:
                 map_yaml = yaml.safe_load(f)
-            img = cv2.imread(os.path.join(self.maps_dir, map_yaml["image"]), cv2.IMREAD_GRAYSCALE)
+            img = self.get_costmap_as_image()
+            #cv2.imread(os.path.join(self.maps_dir, map_yaml["image"]), cv2.IMREAD_GRAYSCALE)
             img_color = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
-
-            for planner_id in self.planners:
-                self.get_logger().info(f"Using planner: {planner_id}")
-                for model_name, params in self.collision_models:
-                    self.get_logger().info(f"Using collision model: {model_name}")
-                    self.switch_collision_model(params)
-
+            for model_name, params in self.collision_models:
+                self.get_logger().info(f"Using collision model: {model_name}")
+                self.switch_collision_model(params) 
+                for planner_id in self.planners:
+                    self.get_logger().info(f"Using planner: {planner_id}")
                     for start, goal in self.start_goal_sets:
                         # Update start point in TF publisher node
                         # if self.tf_publisher:
@@ -161,8 +209,10 @@ class BenchmarkClient(Node):
         # No changes to this method
 
     def switch_collision_model(self, params):
-        pass
-        # No changes to this method
+        req = SetParameters.Request()
+        req.parameters = [p.to_parameter_msg() for p in params]
+        self.collision_models_client.call_async(req)
+        time.sleep(2.0)  # Allow time for parameters to take effect
 
     def call_path_service(self, img, map_yaml, map_file, planner_id, model_name, start, goal):
         if not self.services_available:
@@ -266,7 +316,7 @@ if(__name__ == '__main__'):
     executor.add_node(benchmark_client)
     
     # Spin in a separate thread for TF publishing to continue regardless of service availability
-    import threading
+
 
     executor_thread = threading.Thread(target=executor.spin, daemon=True)
     executor_thread.start()

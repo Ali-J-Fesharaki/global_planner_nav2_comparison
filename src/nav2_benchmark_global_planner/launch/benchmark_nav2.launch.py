@@ -66,7 +66,7 @@ def generate_launch_description():
         planner_server_cmd,
         lifecycle_manager_cmd,
         map_base_link_tf_pub_cmd,
-        # path_service_node_cmd,
+        path_service_node_cmd,
         # benchmark_client_cmd,
-        # rviz_cmd
+        rviz_cmd
     ])
